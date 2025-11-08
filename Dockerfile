@@ -35,11 +35,16 @@ WORKDIR /workspace
 # Clone repository
 # --------------------------
 RUN git clone https://github.com/ModelTC/Wan2.2-Lightning.git
-WORKDIR /workspace/Wan2.2-Lightning
+
+# --------------------------
+# Copy your handler into repo
+# --------------------------
+COPY rp_handler.py /workspace/Wan2.2-Lightning/rp_handler.py
 
 # --------------------------
 # Python dependencies
 # --------------------------
+WORKDIR /workspace/Wan2.2-Lightning
 RUN pip install runpod librosa decord hf_transfer
 RUN pip install flash_attn --no-build-isolation
 RUN pip install -r requirements.txt
@@ -52,4 +57,4 @@ ENV CUDA_VISIBLE_DEVICES=0
 # --------------------------
 # Serverless entrypoint
 # --------------------------
-CMD ["python","-u", "rp_handler.py"]
+CMD ["python", "-u", "rp_handler.py"]
