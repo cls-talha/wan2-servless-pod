@@ -35,7 +35,6 @@ WORKDIR /workspace
 # Clone repository
 # --------------------------
 RUN git clone https://github.com/ModelTC/Wan2.2-Lightning.git
-
 WORKDIR /workspace/Wan2.2-Lightning
 
 # --------------------------
