@@ -8,6 +8,7 @@ from datetime import datetime
 from PIL import Image
 import torch
 import runpod
+import subprocess
 
 import wan
 from wan.configs import WAN_CONFIGS, MAX_AREA_CONFIGS, SUPPORTED_SIZES
@@ -16,6 +17,47 @@ from wan.utils.utils import save_video
 # -------------------- Logging --------------------
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("wan-i2v-serverless")
+
+# --------------------
+# Model / Lightning Setup
+# --------------------
+WAN_CHECKPOINT_DIR = "./Wan2.2-I2V-A14B"
+LIGHTNING_DIR = "./Wan2.2-Lightning"
+LORA_KEEP = "Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1"
+
+def setup_models():
+    # WAN checkpoint
+    if not os.path.exists(WAN_CHECKPOINT_DIR):
+        logger.info("[SETUP] Downloading WAN I2V checkpoint...")
+        subprocess.run([
+            "huggingface-cli", "download",
+            "Wan-AI/Wan2.2-I2V-A14B",
+            "--local-dir", WAN_CHECKPOINT_DIR
+        ], check=True)
+    else:
+        logger.info("[SETUP] WAN I2V checkpoint already exists.")
+
+    # Lightning repo
+    if not os.path.exists(LIGHTNING_DIR):
+        logger.info("[SETUP] Downloading Wan2.2-Lightning repo...")
+        subprocess.run([
+            "huggingface-cli", "download",
+            "lightx2v/Wan2.2-Lightning",
+            "--local-dir", LIGHTNING_DIR
+        ], check=True)
+    else:
+        logger.info("[SETUP] Wan2.2-Lightning already exists.")
+
+    # Clean up Lightning folder: keep only LoRA folder
+    for folder in os.listdir(LIGHTNING_DIR):
+        folder_path = os.path.join(LIGHTNING_DIR, folder)
+        if os.path.isdir(folder_path) and folder != LORA_KEEP:
+            logger.info(f"[SETUP] Removing folder {folder_path}")
+            subprocess.run(["rm", "-rf", folder_path], check=True)
+
+# Run setup once
+setup_models()
+
 
 # -------------------- Global Config --------------------
 PIPELINE = None
