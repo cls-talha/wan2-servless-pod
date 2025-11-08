@@ -52,4 +52,4 @@ ENV CUDA_VISIBLE_DEVICES=0
 # --------------------------
 # Serverless entrypoint
 # --------------------------
-CMD ["python","u", "rp_handler.py"]
+CMD ["python","-u", "rp_handler.py"]
