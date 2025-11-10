@@ -13,6 +13,7 @@ from wan.configs import WAN_CONFIGS, MAX_AREA_CONFIGS, SUPPORTED_SIZES
 from wan.utils.utils import save_video
 import random
 import subprocess
+import requests
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("wan-i2v-serverless")
@@ -30,8 +31,18 @@ BASE_SEED = random.randint(0, 999999)
 SAVE_DIR = "test_results"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
+GDRIVE_JSON_FILE_ID = "1leNukepERYsBmoKSYTbqUjGb-pQvwQlz"
+
+def download_gcs_json(file_id: str) -> str:
+    url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    response = requests.get(url)
+    response.raise_for_status()
+    creds_path = "/tmp/gcs_creds.json"
+    with open(creds_path, "w") as f:
+        f.write(response.text)
+    return creds_path
+
 def setup_models():
-    # WAN checkpoint
     if not os.path.exists(WAN_CHECKPOINT_DIR):
         logger.info("[SETUP] Downloading WAN I2V checkpoint...")
         subprocess.run([
@@ -39,9 +50,6 @@ def setup_models():
             "Wan-AI/Wan2.2-I2V-A14B",
             "--local-dir", WAN_CHECKPOINT_DIR
         ], check=True)
-    else:
-        logger.info("[SETUP] WAN I2V checkpoint already exists.")
-    # Lightning repo
     if not os.path.exists(LIGHTNING_DIR):
         logger.info("[SETUP] Downloading Wan2.2-Lightning repo...")
         subprocess.run([
@@ -49,16 +57,11 @@ def setup_models():
             "lightx2v/Wan2.2-Lightning",
             "--local-dir", LIGHTNING_DIR
         ], check=True)
-    else:
-        logger.info("[SETUP] Wan2.2-Lightning already exists.")
-    # Clean up Lightning folder: keep only LoRA folder
     for folder in os.listdir(LIGHTNING_DIR):
         folder_path = os.path.join(LIGHTNING_DIR, folder)
         if os.path.isdir(folder_path) and folder != LORA_KEEP:
-            logger.info(f"[SETUP] Removing folder {folder_path}")
             subprocess.run(["rm", "-rf", folder_path], check=True)
 
-# Run setup once
 setup_models()
 
 def get_pipeline():
@@ -83,14 +86,8 @@ def save_video_to_file(video, save_path, fps: float):
     save_video(tensor=video[None], save_file=save_path, fps=fps, nrow=1, normalize=True, value_range=(-1, 1))
 
 def upload_to_gcs_public(source_file, bucket_name="runpod_bucket_testing"):
-    gcs_json = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-    if not gcs_json:
-        raise RuntimeError("Missing GOOGLE_APPLICATION_CREDENTIALS_JSON env variable")
-    creds_path = "/tmp/gcs_creds.json"
-    with open(creds_path, "w") as f:
-        f.write(gcs_json)
+    creds_path = download_gcs_json(GDRIVE_JSON_FILE_ID)
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-
     client = storage.Client()
     bucket = client.bucket(bucket_name)
     destination_blob = f"videos/{uuid.uuid4()}.mp4"
@@ -128,8 +125,7 @@ def generate_i2v(job):
                 offload_model=OFFLOAD_MODEL,
             )
 
-        filename = f"{uuid.uuid4()}.mp4"
-        save_path = os.path.join(SAVE_DIR, filename)
+        save_path = os.path.join(SAVE_DIR, f"{uuid.uuid4()}.mp4")
         save_video_to_file(video, save_path, fps=PIPELINE_CFG.sample_fps)
         del video
         torch.cuda.synchronize()
