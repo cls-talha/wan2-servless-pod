@@ -11,6 +11,7 @@ from google.cloud import storage
 import wan
 from wan.configs import WAN_CONFIGS, MAX_AREA_CONFIGS, SUPPORTED_SIZES
 from wan.utils.utils import save_video
+import random
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("wan-i2v-serverless")
