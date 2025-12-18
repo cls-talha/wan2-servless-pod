@@ -3,21 +3,20 @@ import io
 import base64
 import uuid
 import logging
-from datetime import timedelta
 from PIL import Image
 import torch
 import runpod
-from google.cloud import storage
 import wan
-from wan.configs import WAN_CONFIGS, MAX_AREA_CONFIGS, SUPPORTED_SIZES
+from wan.configs import WAN_CONFIGS, MAX_AREA_CONFIGS
 from wan.utils.utils import save_video
 import random
 import subprocess
-import requests
+import boto3
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("wan-i2v-serverless")
 
+# -------------------- Configs --------------------
 WAN_CHECKPOINT_DIR = "./Wan2.2-I2V-A14B"
 LIGHTNING_DIR = "./Wan2.2-Lightning"
 LORA_KEEP = "Wan2.2-I2V-A14B-4steps-lora-rank64-Seko-V1"
@@ -31,17 +30,20 @@ BASE_SEED = random.randint(0, 999999)
 SAVE_DIR = "test_results"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-GDRIVE_JSON_FILE_ID = "1leNukepERYsBmoKSYTbqUjGb-pQvwQlz"
+# -------------------- AWS S3 Setup --------------------
+AWS_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY")
+AWS_SECRET_KEY = os.environ.get("AWS_SECRET_KEY")
+REGION = os.environ.get("AWS_REGION", "us-east-2")
+BUCKET_NAME = os.environ.get("AWS_BUCKET_NAME", "runpodstorageforserverless")
 
-def download_gcs_json(file_id: str) -> str:
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
-    response = requests.get(url)
-    response.raise_for_status()
-    creds_path = "/tmp/gcs_creds.json"
-    with open(creds_path, "w") as f:
-        f.write(response.text)
-    return creds_path
+s3 = boto3.client(
+    "s3",
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY,
+    region_name=REGION
+)
 
+# -------------------- Model Setup --------------------
 def setup_models():
     if not os.path.exists(WAN_CHECKPOINT_DIR):
         logger.info("[SETUP] Downloading WAN I2V checkpoint...")
@@ -85,17 +87,26 @@ def get_pipeline():
 def save_video_to_file(video, save_path, fps: float):
     save_video(tensor=video[None], save_file=save_path, fps=fps, nrow=1, normalize=True, value_range=(-1, 1))
 
-def upload_to_gcs_public(source_file, bucket_name="runpod_bucket_testing"):
-    creds_path = download_gcs_json(GDRIVE_JSON_FILE_ID)
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    destination_blob = f"videos/{uuid.uuid4()}.mp4"
-    blob = bucket.blob(destination_blob)
-    blob.upload_from_filename(source_file)
-    url = blob.generate_signed_url(expiration=timedelta(hours=1))
-    return url
+# -------------------- S3 Upload --------------------
+def upload_to_s3_public(source_file, folder="videos"):
+    """
+    Upload a local file to S3 under the specified folder.
+    Returns the public URL (bucket must allow public read via policy).
+    """
+    destination_key = f"{folder}/{uuid.uuid4()}.mp4"
+    content_type = "video/mp4"
 
+    s3.upload_file(
+        Filename=source_file,
+        Bucket=BUCKET_NAME,
+        Key=destination_key,
+        ExtraArgs={"ContentType": content_type}
+    )
+
+    public_url = f"https://{BUCKET_NAME}.s3.amazonaws.com/{destination_key}"
+    return public_url
+
+# -------------------- Generation Handler --------------------
 def generate_i2v(job):
     try:
         inputs = job.get("input", {})
@@ -130,13 +141,14 @@ def generate_i2v(job):
         del video
         torch.cuda.synchronize()
 
-        gcs_url = upload_to_gcs_public(save_path)
+        s3_url = upload_to_s3_public(save_path)
         os.remove(save_path)
 
-        return {"status": "success", "gcs_url": gcs_url}
+        return {"status": "success", "s3_url": s3_url}
 
     except Exception as e:
         logger.exception("Generation failed")
         return {"status": "failed", "error": str(e)}
 
+# -------------------- Start RunPod Serverless --------------------
 runpod.serverless.start({"handler": generate_i2v})
